@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PiSpeed Monitor</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-adapter-date-fns/3.0.0/chartjs-adapter-date-fns.bundle.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
 <style>
   :root {
@@ -842,6 +841,7 @@ function showPage(name) {
     b.classList.toggle('active', pages[i] === name);
   });
   if (name === 'dashboard') renderCharts();
+  if (name === 'settings') loadSettings();
 }
 
 // ─── Data Fetching ────────────────────────────────────────────
@@ -971,14 +971,21 @@ function renderCharts() {
   const threshDown = ispDown * thresh;
   const threshUp = ispUp * thresh;
 
-  const labels = filtered.map(r => new Date(r.timestamp));
-  const downs = filtered.map(r => r.download);
-  const ups = filtered.map(r => r.upload);
-  const pings = filtered.map(r => r.ping);
+  // Downsample for readability
+  const step = Math.max(1, Math.floor(filtered.length / 60));
+  const filtered2 = filtered.filter((_,i) => i % step === 0);
+  const labels = filtered2.map(r => {
+    const d = new Date(r.timestamp);
+    return d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) + ' ' + d.toLocaleDateString([],{month:'short',day:'numeric'});
+  });
+  const downs = filtered2.map(r => r.download);
+  const ups = filtered2.map(r => r.upload);
+  const pings = filtered2.map(r => r.ping);
 
   const chartDefaults = {
     responsive: true,
     maintainAspectRatio: false,
+    animation: false,
     interaction: { mode: 'index', intersect: false },
     plugins: {
       legend: { display: false },
@@ -1001,9 +1008,8 @@ function renderCharts() {
     },
     scales: {
       x: {
-        type: 'time',
         grid: { color: 'rgba(31,45,69,0.6)' },
-        ticks: { color: '#475569', font: { family: 'JetBrains Mono', size: 10 } }
+        ticks: { color: '#475569', font: { family: 'JetBrains Mono', size: 9 }, maxRotation: 45, maxTicksLimit: 12 }
       },
       y: {
         grid: { color: 'rgba(31,45,69,0.6)' },
@@ -1013,9 +1019,8 @@ function renderCharts() {
   };
 
   // Speed chart
-  const speedCtx = document.getElementById('speedChart').getContext('2d');
-  if (speedChart) speedChart.destroy();
-
+  if (speedChart) { try { speedChart.destroy(); } catch(e){} speedChart = null; }
+  const speedCtx = document.getElementById('speedChart');
   speedChart = new Chart(speedCtx, {
     type: 'line',
     data: {
@@ -1089,9 +1094,8 @@ function renderCharts() {
   });
 
   // Ping chart
-  const pingCtx = document.getElementById('pingChart').getContext('2d');
-  if (pingChart) pingChart.destroy();
-
+  if (pingChart) { try { pingChart.destroy(); } catch(e){} pingChart = null; }
+  const pingCtx = document.getElementById('pingChart');
   pingChart = new Chart(pingCtx, {
     type: 'line',
     data: {
@@ -1212,13 +1216,16 @@ function renderViolations() {
 
 // ─── Settings ─────────────────────────────────────────────────
 function loadSettings() {
-  document.getElementById('cfgIspDown').value = config.isp_download || 100;
-  document.getElementById('cfgIspUp').value = config.isp_upload || 20;
-  document.getElementById('cfgThreshold').value = config.threshold_percent || 80;
-  document.getElementById('cfgInterval').value = config.interval_minutes || 60;
-  document.getElementById('cfgBackend').value = config.backend || 'auto';
-  document.getElementById('cfgPort').value = config.port || 8080;
-  document.getElementById('cfgName').value = config.display_name || 'PiSpeed Monitor';
+  fetch('/api/config').then(r => r.json()).then(cfg => {
+    config = cfg;
+    document.getElementById('cfgIspDown').value = cfg.isp_download || '';
+    document.getElementById('cfgIspUp').value = cfg.isp_upload || '';
+    document.getElementById('cfgThreshold').value = cfg.threshold_percent || '';
+    document.getElementById('cfgInterval').value = cfg.interval_minutes || '';
+    document.getElementById('cfgBackend').value = cfg.backend || 'auto';
+    document.getElementById('cfgPort').value = cfg.port || '';
+    document.getElementById('cfgName').value = cfg.display_name || '';
+  }).catch(() => showToast('Could not load settings'));
 }
 
 async function saveSettings() {
@@ -1239,7 +1246,7 @@ async function saveSettings() {
       body: JSON.stringify(newCfg)
     });
     const data = await r.json();
-    if (data.status === 'ok') {
+    if (resp.ok) {
       config = data.config;
       showToast('✅ Settings saved!');
       renderDashboard();
