@@ -735,10 +735,15 @@
   <!-- VIOLATIONS PAGE -->
   <div class="page" id="page-violations">
     <div class="panel" style="margin-bottom:20px; background: rgba(239,68,68,0.05); border-color: rgba(239,68,68,0.2)">
-      <div style="font-size:13px; color:var(--text2); font-family:var(--mono)">
-        ⚠️ &nbsp;This page lists all tests where your speed fell below your configured threshold, or where an outage was detected.
-        Use this data as evidence when contacting your ISP.
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+        <div style="font-size:13px; color:var(--text2); font-family:var(--mono)">
+          ⚠️ &nbsp;All tests where your speed fell below threshold, or an outage was detected. Use this as evidence when contacting your ISP.
+        </div>
+        <button class="btn btn-outline" onclick="markAllReviewed()" id="markReviewedBtn" style="display:none; border-color:var(--warn); color:var(--warn);">
+          ✓ Mark All as Reviewed
+        </button>
       </div>
+      <div id="reviewedInfo" style="display:none; margin-top:10px; font-size:11px; color:var(--text3); font-family:var(--mono)"></div>
     </div>
     <div id="violationsList">
       <div class="empty-state"><div class="empty-icon">✅</div>No violations found. Your ISP is behaving!</div>
@@ -1160,12 +1165,25 @@ function renderHistory() {
 }
 
 // ─── Violations ───────────────────────────────────────────────
+function getAcknowledgedEpoch() {
+  const val = localStorage.getItem('pispeed_ack_epoch');
+  return val ? parseInt(val) : 0;
+}
+
+function markAllReviewed() {
+  const latest = allResults.length ? Math.max(...allResults.map(r => r.epoch || 0)) : 0;
+  localStorage.setItem('pispeed_ack_epoch', latest);
+  showToast('✅ All violations marked as reviewed');
+  renderViolations();
+}
+
 function renderViolations() {
   const ispDown = config.isp_download || 100;
   const ispUp = config.isp_upload || 20;
   const thresh = (config.threshold_percent || 80) / 100;
   const threshDown = ispDown * thresh;
   const threshUp = ispUp * thresh;
+  const ackEpoch = getAcknowledgedEpoch();
 
   const violations = [];
   for (const r of allResults) {
@@ -1179,13 +1197,33 @@ function renderViolations() {
     }
   }
 
+  // Only unacknowledged ones count toward the badge
+  const unacked = violations.filter(v => (v.epoch || 0) > ackEpoch);
+
   // Update badge
   const badge = document.getElementById('vBadge');
-  if (violations.length > 0) {
+  if (unacked.length > 0) {
     badge.style.display = 'inline-flex';
-    badge.textContent = violations.length > 99 ? '99+' : violations.length;
+    badge.textContent = unacked.length > 99 ? '99+' : unacked.length;
   } else {
     badge.style.display = 'none';
+  }
+
+  // Show/hide the Mark Reviewed button
+  const markBtn = document.getElementById('markReviewedBtn');
+  const reviewedInfo = document.getElementById('reviewedInfo');
+  if (unacked.length > 0) {
+    markBtn.style.display = 'inline-flex';
+  } else {
+    markBtn.style.display = 'none';
+  }
+
+  // Show reviewed-until info if any are acknowledged
+  if (ackEpoch > 0) {
+    reviewedInfo.style.display = 'block';
+    reviewedInfo.textContent = `✓ Reviewed up to: ${new Date(ackEpoch * 1000).toLocaleString()} — older violations are dimmed`;
+  } else {
+    reviewedInfo.style.display = 'none';
   }
 
   const container = document.getElementById('violationsList');
@@ -1198,9 +1236,13 @@ function renderViolations() {
   container.innerHTML = sorted.map(v => {
     const ts = new Date(v.timestamp).toLocaleString();
     const isOutage = v.vtype === 'outage';
-    return `<div class="violation-item ${v.vtype}">
+    const isAcked = (v.epoch || 0) <= ackEpoch;
+    return `<div class="violation-item ${v.vtype}" style="${isAcked ? 'opacity:0.4;' : ''}">
       <div class="v-header">
-        <span class="badge ${isOutage ? 'badge-outage' : 'badge-warn'}">${isOutage ? '⚡ Outage' : '⚠ Below Threshold'}</span>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span class="badge ${isOutage ? 'badge-outage' : 'badge-warn'}">${isOutage ? '⚡ Outage' : '⚠ Below Threshold'}</span>
+          ${isAcked ? '<span style="font-size:10px;font-family:var(--mono);color:var(--text3)">reviewed</span>' : ''}
+        </div>
         <span class="v-time">${ts}</span>
       </div>
       <div class="v-details">${v.reasons.join(' &nbsp;|&nbsp; ')}</div>
