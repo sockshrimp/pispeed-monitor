@@ -72,5 +72,5 @@ All settings can be changed from the web UI → Settings page. Configuration is 
 sudo bash uninstall.sh
 ```
 
-## License
-MIT
+## Disclaimer
+I have no idea what im doing. This is a Claude vibe code project.
